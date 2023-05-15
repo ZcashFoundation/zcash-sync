@@ -23,12 +23,13 @@ required-features = ["dotenv"]
 #name = "ledger"
 #path = "src/main/ledger.rs"
 
-#[[bin]]
-#name = "sign"
-#path = "src/main/sign.rs"
+[[bin]]
+name = "sign"
+path = "src/main/sign.rs"
 
 [lib]
 name = "warp_api_ffi"
+# cdylib
 crate-type = ["rlib"]
 
 [dependencies]
