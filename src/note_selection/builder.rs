@@ -6,14 +6,16 @@ use crate::sync::tree::TreeCheckpoint;
 use crate::sync::Witness;
 use crate::{AccountData, CoinConfig};
 use anyhow::anyhow;
+use ff::PrimeField;
 use jubjub::Fr;
-use orchard::builder::Builder as OrchardBuilder;
+use orchard::builder::{Builder as OrchardBuilder, SigningMetadata};
 use orchard::bundle::Flags;
 use orchard::keys::{FullViewingKey, Scope, SpendAuthorizingKey, SpendingKey};
 use orchard::note::Nullifier;
 use orchard::primitives::redpallas::{self, SpendAuth};
 use orchard::value::NoteValue;
 use orchard::{Address, Anchor, Bundle};
+use pasta_curves::pallas;
 use rand::{CryptoRng, RngCore};
 use ripemd::{Digest, Ripemd160};
 use secp256k1::{All, PublicKey, Secp256k1, SecretKey};
@@ -279,6 +281,25 @@ pub fn build_tx(
             .create_proof(get_proving_key(), &mut rng)
             .unwrap();
         if frost {
+            assert!(orchard_signing_keys.len() == 1);
+            let ask = orchard_signing_keys[0].randomize(&pallas::Scalar::zero());
+            println!(
+                "Orchard SpendAuthorizingKey: {}",
+                hex::encode(<[u8; 32]>::from(ask))
+            );
+
+            let mut alphas = Vec::new();
+            let proven = proven.map_authorization(
+                &mut rng,
+                |_rng, _, SigningMetadata { dummy_ask, parts }| {
+                    alphas.push(parts.alpha);
+                    SigningMetadata { dummy_ask, parts }
+                },
+                |_rng, auth| auth,
+            );
+            assert!(alphas.len() == 1);
+            println!("Randomizer: {}", hex::encode(alphas[0].to_repr().as_ref()));
+
             let mut buffer = String::new();
             let stdin = std::io::stdin();
             println!("Input hex-encoded signature: ");
