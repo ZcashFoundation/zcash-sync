@@ -26,6 +26,7 @@ required-features = ["dotenv"]
 [[bin]]
 name = "sign"
 path = "src/main/sign.rs"
+required-features = ["dotenv"]
 
 [lib]
 name = "warp_api_ffi"

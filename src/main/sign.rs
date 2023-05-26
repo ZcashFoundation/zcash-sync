@@ -1,86 +1,95 @@
-// use clap::{Arg, Command};
-// use std::fs::File;
-// use std::io::{Read, Write};
-// use std::str::FromStr;
-// use sync::{KeyHelpers, Tx};
-// use zcash_client_backend::encoding::decode_extended_spending_key;
-// use zcash_params::coin::CoinType;
-// use zcash_primitives::consensus::{Network, Parameters};
-// use zcash_proofs::prover::LocalTxProver;
-
 use std::fs;
+use std::str::FromStr;
 
-use warp_api_ffi::TransactionPlan;
-use zcash_params::coin::CoinType;
+use clap::{Arg, Command};
+use orchard::keys::SpendingKey;
+use rand_chacha::rand_core::OsRng;
+use secp256k1::SecretKey;
+use warp_api_ffi::note_selection::SecretKeys;
+use warp_api_ffi::orchard::derive_orchard_keys;
+use warp_api_ffi::{build_tx, TransactionPlan};
+use warp_api_ffi::{key2::decode_key, taddr::derive_tkeys};
+use zcash_client_backend::encoding::{
+    decode_extended_full_viewing_key, decode_extended_spending_key,
+};
+use zcash_params::coin::{get_coin_id, CoinType};
+use zcash_primitives::consensus::{Network, Parameters};
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    println!("Hello world!");
+fn main() -> anyhow::Result<()> {
+    let matches = Command::new("Cold wallet Signer CLI")
+        .version("1.0")
+        .arg(Arg::new("coin").short('c').long("coin").takes_value(true))
+        .arg(
+            Arg::new("tx_filename")
+                .short('t')
+                .long("tx")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::new("out_filename")
+                .short('o')
+                .long("out")
+                .takes_value(true),
+        )
+        .get_matches();
 
-    let tx_plan = fs::read_to_string("tx.json").expect("Should have been able to read the file");
-    let coin = 0;
-    let account = 1;
+    let coin = matches.value_of("coin").expect("coin argument missing");
+    let tx_filename = matches
+        .value_of("tx_filename")
+        .expect("input filename missing");
+    let out_filename = matches
+        .value_of("out_filename")
+        .expect("output filename missing");
 
-    let res = async {
-        warp_api_ffi::init_coin(coin, "/home/conrado/databases/zec.db").unwrap();
-        let tx_plan: TransactionPlan = serde_json::from_str(&tx_plan)?;
-        let raw_tx = warp_api_ffi::api::payment_v2::sign_plan(coin, account, &tx_plan)?;
-        let tx_str = base64::encode(&raw_tx);
-        Ok::<_, anyhow::Error>(tx_str)
+    let tx_plan = fs::read_to_string(tx_filename).expect("Should have been able to read the file");
+    let tx_plan: TransactionPlan = serde_json::from_str(&tx_plan)?;
+
+    let (coin_type, network) = match coin {
+        "zcash" => (CoinType::Zcash, Network::MainNetwork),
+        "ycash" => (CoinType::Ycash, Network::YCashMainNetwork),
+        _ => panic!("Invalid coin"),
     };
-    let res = res.await.unwrap();
-    println!("{}", res);
+    let key = dotenv::var("KEY").unwrap();
+    let index = u32::from_str(&dotenv::var("INDEX").unwrap_or_else(|_| "0".to_string())).unwrap();
+    let coin = get_coin_id(coin_type);
+    let (seed, sk, fvk, _pa, _ofvk) = decode_key(coin, &key, index)?;
+    let seed = seed.unwrap();
 
-    // let matches = Command::new("Cold wallet Signer CLI")
-    //     .version("1.0")
-    //     .arg(Arg::new("coin").short('c').long("coin").takes_value(true))
-    //     .arg(
-    //         Arg::new("tx_filename")
-    //             .short('t')
-    //             .long("tx")
-    //             .takes_value(true),
-    //     )
-    //     .arg(
-    //         Arg::new("out_filename")
-    //             .short('o')
-    //             .long("out")
-    //             .takes_value(true),
-    //     )
-    //     .get_matches();
+    let fvk =
+        decode_extended_full_viewing_key(network.hrp_sapling_extended_full_viewing_key(), &fvk)
+            .unwrap()
+            .to_diversifiable_full_viewing_key();
+    let tx_plan_fvk = decode_extended_full_viewing_key(
+        network.hrp_sapling_extended_full_viewing_key(),
+        &tx_plan.fvk,
+    )
+    .unwrap()
+    .to_diversifiable_full_viewing_key();
 
-    // let coin = matches.value_of("coin").expect("coin argument missing");
-    // let tx_filename = matches
-    //     .value_of("tx_filename")
-    //     .expect("input filename missing");
-    // let out_filename = matches
-    //     .value_of("out_filename")
-    //     .expect("output filename missing");
+    if fvk.to_bytes() != tx_plan_fvk.to_bytes() {
+        return Err(anyhow::anyhow!("Account does not match transaction"));
+    }
 
-    // let (coin_type, network) = match coin {
-    //     "zcash" => (CoinType::Zcash, Network::MainNetwork),
-    //     "ycash" => (CoinType::Ycash, Network::YCashMainNetwork),
-    //     _ => panic!("Invalid coin"),
-    // };
-    // let key = dotenv::var("KEY").unwrap();
-    // let index = u32::from_str(&dotenv::var("INDEX").unwrap_or_else(|_| "0".to_string())).unwrap();
-    // let kh = KeyHelpers::new(coin_type);
-    // let (_seed, sk, _ivk, _address) = kh.decode_key(&key, index)?;
+    let bip44_path = format!("m/44'/{}'/0'/0/{}", network.coin_type(), index);
+    let (tsk, _address) = derive_tkeys(&network, &seed, &bip44_path)?;
+    let transparent_sk = SecretKey::from_str(&tsk).unwrap();
 
-    // let sk = sk.unwrap();
-    // let sk =
-    //     decode_extended_spending_key(network.hrp_sapling_extended_spending_key(), &sk)?.unwrap();
+    let sapling_sk = sk.unwrap();
+    let sapling_sk =
+        decode_extended_spending_key(network.hrp_sapling_extended_spending_key(), &sapling_sk)
+            .unwrap();
 
-    // let mut file = File::open(tx_filename)?;
-    // let mut s = String::new();
-    // file.read_to_string(&mut s).unwrap();
-    // let tx: Tx = serde_json::from_str(&s)?;
-    // let prover = LocalTxProver::with_default_location()
-    //     .ok_or_else(|| anyhow::anyhow!("Cannot create prover. Missing zcash-params?"))?;
-    // let raw_tx = tx.sign(None, &sk, &prover, |p| {
-    //     println!("Progress {}", p.cur());
-    // })?;
+    let ob = derive_orchard_keys(network.coin_type(), &seed, index);
+    let orchard_sk = ob.sk.map(|sk| SpendingKey::from_bytes(sk).unwrap());
 
-    // let mut out_file = File::create(out_filename)?;
-    // writeln!(out_file, "{}", hex::encode(&raw_tx))?;
+    let keys = SecretKeys {
+        transparent: Some(transparent_sk),
+        sapling: Some(sapling_sk),
+        orchard: orchard_sk,
+    };
+
+    let tx = build_tx(&network, &keys, &tx_plan, OsRng)?;
+
+    fs::write(out_filename, hex::encode(&tx))?;
     Ok(())
 }
