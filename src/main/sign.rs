@@ -88,7 +88,7 @@ fn main() -> anyhow::Result<()> {
         orchard: orchard_sk,
     };
 
-    let tx = build_tx(&network, &keys, &tx_plan, OsRng)?;
+    let tx = build_tx(&network, &keys, &tx_plan, true, OsRng)?;
 
     fs::write(out_filename, hex::encode(&tx))?;
     Ok(())

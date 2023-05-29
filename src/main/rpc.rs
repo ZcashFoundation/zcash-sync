@@ -349,7 +349,7 @@ pub async fn build_from_plan(tx_plan: Json<TransactionPlan>) -> Result<String, E
     }
 
     let keys = get_secret_keys(c.coin, c.id_account)?;
-    let tx = build_tx(c.chain.network(), &keys, &tx_plan, OsRng).unwrap();
+    let tx = build_tx(c.chain.network(), &keys, &tx_plan, false, OsRng).unwrap();
     let tx = hex::encode(&tx);
     Ok(tx)
 }

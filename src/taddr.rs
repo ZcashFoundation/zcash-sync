@@ -353,7 +353,7 @@ pub async fn sweep_tkey(
         orchard: None,
     };
     println!("build_tx");
-    let tx = build_tx(network, &skeys, &tx_plan, OsRng)?;
+    let tx = build_tx(network, &skeys, &tx_plan, false, OsRng)?;
     println!("broadcast_tx");
     let txid = broadcast_tx(&tx).await?;
     Ok(txid)

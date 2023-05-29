@@ -11,6 +11,7 @@ use orchard::builder::Builder as OrchardBuilder;
 use orchard::bundle::Flags;
 use orchard::keys::{FullViewingKey, Scope, SpendAuthorizingKey, SpendingKey};
 use orchard::note::Nullifier;
+use orchard::primitives::redpallas::{self, SpendAuth};
 use orchard::value::NoteValue;
 use orchard::{Address, Anchor, Bundle};
 use rand::{CryptoRng, RngCore};
@@ -72,6 +73,7 @@ pub fn build_tx(
     network: &Network,
     skeys: &SecretKeys,
     plan: &TransactionPlan,
+    frost: bool,
     mut rng: impl RngCore + CryptoRng + Clone,
 ) -> anyhow::Result<Vec<u8>> {
     let secp = Secp256k1::<All>::new();
@@ -251,6 +253,10 @@ pub fn build_tx(
     let sig_hash = signature_hash(&unauthed_tx, &SignableInput::Shielded, &txid_parts);
     let sig_hash: [u8; 32] = sig_hash.as_ref().clone();
 
+    if frost {
+        println!("SIGHASH: {}", hex::encode(&sig_hash));
+    }
+
     let transparent_bundle = unauthed_tx
         .transparent_bundle()
         .map(|tb| tb.clone().apply_signatures(&unauthed_tx, &txid_parts));
@@ -272,9 +278,26 @@ pub fn build_tx(
             .clone()
             .create_proof(get_proving_key(), &mut rng)
             .unwrap();
-        proven
-            .apply_signatures(&mut rng, sig_hash, &orchard_signing_keys)
-            .unwrap()
+        if frost {
+            let mut buffer = String::new();
+            let stdin = std::io::stdin();
+            println!("Input hex-encoded signature: ");
+            stdin.read_line(&mut buffer).unwrap();
+            let signature = hex::decode(buffer.trim()).unwrap();
+            let signature: [u8; 64] = signature.try_into().unwrap();
+            let signature = redpallas::Signature::<SpendAuth>::from(signature);
+
+            proven
+                .prepare(&mut rng, sig_hash)
+                .append_signatures(&[signature])
+                .unwrap()
+                .finalize()
+                .unwrap()
+        } else {
+            proven
+                .apply_signatures(&mut rng, sig_hash, &orchard_signing_keys)
+                .unwrap()
+        }
     });
 
     let tx_data: TransactionData<zcash_primitives::transaction::Authorized> =

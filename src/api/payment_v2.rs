@@ -122,7 +122,7 @@ pub async fn build_tx_plan(
     Ok(tx_plan)
 }
 
-pub fn sign_plan(coin: u8, account: u32, tx_plan: &TransactionPlan) -> anyhow::Result<Vec<u8>> {
+pub fn sign_plan(coin: u8, account: u32, tx_plan: &TransactionPlan, frost: bool) -> anyhow::Result<Vec<u8>> {
     let c = CoinConfig::get(coin);
     let network = c.chain.network();
     let fvk = {
@@ -146,7 +146,7 @@ pub fn sign_plan(coin: u8, account: u32, tx_plan: &TransactionPlan) -> anyhow::R
     }
 
     let keys = get_secret_keys(coin, account)?;
-    let tx = build_tx(c.chain.network(), &keys, &tx_plan, OsRng)?;
+    let tx = build_tx(c.chain.network(), &keys, &tx_plan, frost, OsRng)?;
     Ok(tx)
 }
 
@@ -155,7 +155,7 @@ pub async fn sign_and_broadcast(
     account: u32,
     tx_plan: &TransactionPlan,
 ) -> anyhow::Result<String> {
-    let tx = sign_plan(coin, account, tx_plan)?;
+    let tx = sign_plan(coin, account, tx_plan, false)?;
     let txid = broadcast_tx(&tx).await?;
     let id_notes: Vec<_> = tx_plan
         .spends
