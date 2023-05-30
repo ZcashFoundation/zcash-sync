@@ -88,8 +88,10 @@ fn main() -> anyhow::Result<()> {
         orchard: orchard_sk,
     };
 
-    let tx = build_tx(&network, &keys, &tx_plan, true, OsRng)?;
+    let tx = build_tx(&network, &keys, &tx_plan, false, OsRng)?;
 
     fs::write(out_filename, hex::encode(&tx))?;
+
+    println!("Tx written to {}", out_filename);
     Ok(())
 }

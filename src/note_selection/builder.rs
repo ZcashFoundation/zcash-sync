@@ -8,7 +8,7 @@ use crate::{AccountData, CoinConfig};
 use anyhow::anyhow;
 use ff::PrimeField;
 use jubjub::Fr;
-use orchard::builder::{Builder as OrchardBuilder, SigningMetadata};
+use orchard::builder::{Builder as OrchardBuilder, MaybeSigned, SigningMetadata};
 use orchard::bundle::Flags;
 use orchard::keys::{FullViewingKey, Scope, SpendAuthorizingKey, SpendingKey};
 use orchard::note::Nullifier;
@@ -288,29 +288,44 @@ pub fn build_tx(
                 hex::encode(<[u8; 32]>::from(ask))
             );
 
+            let proven = proven.prepare(&mut rng, sig_hash);
+
+            let expected_ak = (&orchard_signing_keys[0]).into();
+
             let mut alphas = Vec::new();
             let proven = proven.map_authorization(
                 &mut rng,
-                |_rng, _, SigningMetadata { dummy_ask, parts }| {
-                    alphas.push(parts.alpha);
-                    SigningMetadata { dummy_ask, parts }
+                |_rng, _partial, maybe| {
+                    if let MaybeSigned::SigningMetadata(parts) = &maybe {
+                        if parts.ak == expected_ak {
+                            alphas.push(parts.alpha);
+                        }
+                    }
+                    maybe
                 },
                 |_rng, auth| auth,
             );
-            assert!(alphas.len() == 1);
-            println!("Randomizer: {}", hex::encode(alphas[0].to_repr().as_ref()));
 
-            let mut buffer = String::new();
-            let stdin = std::io::stdin();
-            println!("Input hex-encoded signature: ");
-            stdin.read_line(&mut buffer).unwrap();
-            let signature = hex::decode(buffer.trim()).unwrap();
-            let signature: [u8; 64] = signature.try_into().unwrap();
-            let signature = redpallas::Signature::<SpendAuth>::from(signature);
+            let mut signatures = Vec::new();
+
+            for (i, alpha) in alphas.iter().enumerate() {
+                println!(
+                    "Randomizer #{}: {}",
+                    i,
+                    hex::encode(alpha.to_repr().as_ref())
+                );
+                let mut buffer = String::new();
+                let stdin = std::io::stdin();
+                println!("Input hex-encoded signature #{}: ", i);
+                stdin.read_line(&mut buffer).unwrap();
+                let signature = hex::decode(buffer.trim()).unwrap();
+                let signature: [u8; 64] = signature.try_into().unwrap();
+                let signature = redpallas::Signature::<SpendAuth>::from(signature);
+                signatures.push(signature);
+            }
 
             proven
-                .prepare(&mut rng, sig_hash)
-                .append_signatures(&[signature])
+                .append_signatures(&signatures)
                 .unwrap()
                 .finalize()
                 .unwrap()
