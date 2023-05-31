@@ -90,7 +90,7 @@ fn main() -> anyhow::Result<()> {
 
     let tx = build_tx(&network, &keys, &tx_plan, false, OsRng)?;
 
-    fs::write(out_filename, hex::encode(&tx))?;
+    fs::write(out_filename, base64::encode(&tx))?;
 
     println!("Tx written to {}", out_filename);
     Ok(())
