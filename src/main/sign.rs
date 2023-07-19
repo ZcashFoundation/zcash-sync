@@ -2,18 +2,20 @@ use std::fs;
 use std::str::FromStr;
 
 use clap::{Arg, Command};
-use orchard::keys::SpendingKey;
+use orchard::keys::{FullViewingKey, Scope, SpendingKey};
 use rand_chacha::rand_core::OsRng;
 use secp256k1::SecretKey;
 use warp_api_ffi::note_selection::SecretKeys;
 use warp_api_ffi::orchard::derive_orchard_keys;
 use warp_api_ffi::{build_tx, TransactionPlan};
 use warp_api_ffi::{key2::decode_key, taddr::derive_tkeys};
+use zcash_client_backend::address::UnifiedAddress;
 use zcash_client_backend::encoding::{
     decode_extended_full_viewing_key, decode_extended_spending_key,
 };
+use zcash_client_backend::keys::UnifiedFullViewingKey;
 use zcash_params::coin::{get_coin_id, CoinType};
-use zcash_primitives::consensus::{Network, Parameters};
+use zcash_primitives::consensus::{MainNetwork, Network, Parameters};
 
 fn main() -> anyhow::Result<()> {
     let matches = Command::new("Cold wallet Signer CLI")
@@ -82,13 +84,24 @@ fn main() -> anyhow::Result<()> {
     let ob = derive_orchard_keys(network.coin_type(), &seed, index);
     let orchard_sk = ob.sk.map(|sk| SpendingKey::from_bytes(sk).unwrap());
 
+    let ofvk = FullViewingKey::from(&orchard_sk.unwrap());
+    let a = ofvk.address_at(0u64, Scope::External);
+    let orchard_address = UnifiedAddress::from_receivers(Some(a), None, None).unwrap();
+    let orchard_address_str = orchard_address.encode(&MainNetwork);
+
+    println!("Orchard address:         {:?}", orchard_address_str);
+
+    let ufvk = UnifiedFullViewingKey::new(Some(fvk), Some(ofvk)).unwrap();
+    let ufvk_str = ufvk.encode(&MainNetwork);
+    println!("Viewing key: {:?}", ufvk_str);
+
     let keys = SecretKeys {
         transparent: Some(transparent_sk),
         sapling: Some(sapling_sk),
         orchard: orchard_sk,
     };
 
-    let tx = build_tx(&network, &keys, &tx_plan, false, OsRng)?;
+    let tx = build_tx(&network, &keys, &tx_plan, true, OsRng)?;
 
     fs::write(out_filename, base64::encode(&tx))?;
 
