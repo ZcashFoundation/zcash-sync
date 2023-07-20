@@ -10,7 +10,7 @@ use ff::PrimeField;
 use jubjub::Fr;
 use orchard::builder::{Builder as OrchardBuilder, MaybeSigned, SigningMetadata};
 use orchard::bundle::Flags;
-use orchard::keys::{FullViewingKey, Scope, SpendAuthorizingKey, SpendingKey};
+use orchard::keys::{FullViewingKey, Scope, SpendAuthorizingKey, SpendValidatingKey, SpendingKey};
 use orchard::note::Nullifier;
 use orchard::primitives::redpallas::{self, SpendAuth};
 use orchard::value::NoteValue;
@@ -75,9 +75,11 @@ pub fn build_tx(
     network: &Network,
     skeys: &SecretKeys,
     plan: &TransactionPlan,
-    frost: bool,
+    ofvk: Option<FullViewingKey>,
     mut rng: impl RngCore + CryptoRng + Clone,
 ) -> anyhow::Result<Vec<u8>> {
+    let frost = ofvk.is_some();
+
     let secp = Secp256k1::<All>::new();
     let transparent_address = skeys.transparent.map(|tkey| {
         let pub_key = PublicKey::from_secret_key(&secp, &tkey);
@@ -92,8 +94,7 @@ pub fn build_tx(
         .map(|sk| sk.to_extended_full_viewing_key());
     let sapling_ovk = sapling_fvk.as_ref().map(|efvk| efvk.fvk.ovk.clone());
 
-    let okeys = skeys.orchard.map(|sk| {
-        let orchard_fvk = FullViewingKey::from(&sk);
+    let okeys = ofvk.map(|orchard_fvk| {
         let orchard_ovk = orchard_fvk.clone().to_ovk(Scope::External);
         (orchard_fvk, orchard_ovk)
     });
@@ -270,27 +271,15 @@ pub fn build_tx(
             .0
     });
 
-    let mut orchard_signing_keys = vec![];
-    if let Some(sk) = skeys.orchard {
-        orchard_signing_keys.push(SpendAuthorizingKey::from(&sk));
-    }
-
     let orchard_bundle = unauthed_tx.orchard_bundle().map(|ob| {
         let proven = ob
             .clone()
             .create_proof(get_proving_key(), &mut rng)
             .unwrap();
         if frost {
-            assert!(orchard_signing_keys.len() == 1);
-            let ask = orchard_signing_keys[0].randomize(&pallas::Scalar::zero());
-            println!(
-                "Orchard SpendAuthorizingKey: {}",
-                hex::encode(<[u8; 32]>::from(ask))
-            );
-
             let proven = proven.prepare(&mut rng, sig_hash);
 
-            let expected_ak = (&orchard_signing_keys[0]).into();
+            let expected_ak = orchard_fvk.unwrap().into();
 
             let mut alphas = Vec::new();
             let proven = proven.map_authorization(
@@ -330,6 +319,10 @@ pub fn build_tx(
                 .finalize()
                 .unwrap()
         } else {
+            let mut orchard_signing_keys = vec![];
+            if let Some(sk) = skeys.orchard {
+                orchard_signing_keys.push(SpendAuthorizingKey::from(&sk));
+            }
             proven
                 .apply_signatures(&mut rng, sig_hash, &orchard_signing_keys)
                 .unwrap()

@@ -637,7 +637,7 @@ pub async unsafe extern "C" fn sign(
     from_c_str!(tx_plan);
     let res = async {
         let tx_plan: TransactionPlan = serde_json::from_str(&tx_plan)?;
-        let raw_tx = crate::api::payment_v2::sign_plan(coin, account, &tx_plan, false)?;
+        let raw_tx = crate::api::payment_v2::sign_plan(coin, account, &tx_plan, None)?;
         let tx_str = base64::encode(&raw_tx);
         Ok::<_, anyhow::Error>(tx_str)
     };

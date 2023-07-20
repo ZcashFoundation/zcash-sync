@@ -1,6 +1,6 @@
 use crate::key2::split_key;
 use bip39::{Language, Mnemonic, Seed};
-use orchard::keys::{FullViewingKey, Scope, SpendingKey};
+use orchard::keys::{FullViewingKey, Scope, SpendValidatingKey, SpendingKey};
 use orchard::Address;
 
 pub struct OrchardKeyBytes {
@@ -26,4 +26,16 @@ pub fn derive_orchard_keys(coin_type: u32, seed: &str, account_index: u32) -> Or
         sk: Some(sk.to_bytes().clone()),
         fvk: fvk.to_bytes(),
     }
+}
+
+pub fn new_orchard_keys_for_ak(
+    coin_type: u32,
+    account_index: u32,
+    ak: SpendValidatingKey,
+) -> FullViewingKey {
+    let mnemonic = Mnemonic::new(bip39::MnemonicType::Words24, Language::English);
+    let seed = Seed::new(&mnemonic, &"");
+    let sk = SpendingKey::from_zip32_seed(seed.as_bytes(), coin_type, account_index).unwrap();
+    let fvk = FullViewingKey::from_sk_ak(&sk, ak);
+    fvk
 }

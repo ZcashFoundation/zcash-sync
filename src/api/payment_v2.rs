@@ -9,6 +9,7 @@ use crate::{
     TransactionBuilderConfig, TransactionBuilderError, TransactionPlan, TxBuilderContext,
     MAX_ATTEMPTS,
 };
+use orchard::keys::{FullViewingKey, SpendValidatingKey};
 use rand::rngs::OsRng;
 use std::cmp::min;
 use std::slice;
@@ -122,7 +123,12 @@ pub async fn build_tx_plan(
     Ok(tx_plan)
 }
 
-pub fn sign_plan(coin: u8, account: u32, tx_plan: &TransactionPlan, frost: bool) -> anyhow::Result<Vec<u8>> {
+pub fn sign_plan(
+    coin: u8,
+    account: u32,
+    tx_plan: &TransactionPlan,
+    ofvk: Option<FullViewingKey>,
+) -> anyhow::Result<Vec<u8>> {
     let c = CoinConfig::get(coin);
     let network = c.chain.network();
     let fvk = {
@@ -146,7 +152,7 @@ pub fn sign_plan(coin: u8, account: u32, tx_plan: &TransactionPlan, frost: bool)
     }
 
     let keys = get_secret_keys(coin, account)?;
-    let tx = build_tx(c.chain.network(), &keys, &tx_plan, frost, OsRng)?;
+    let tx = build_tx(c.chain.network(), &keys, &tx_plan, ofvk, OsRng)?;
     Ok(tx)
 }
 
@@ -155,7 +161,7 @@ pub async fn sign_and_broadcast(
     account: u32,
     tx_plan: &TransactionPlan,
 ) -> anyhow::Result<String> {
-    let tx = sign_plan(coin, account, tx_plan, false)?;
+    let tx = sign_plan(coin, account, tx_plan, None)?;
     let txid = broadcast_tx(&tx).await?;
     let id_notes: Vec<_> = tx_plan
         .spends

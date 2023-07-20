@@ -11,7 +11,7 @@ mod key;
 mod note;
 
 pub use hash::{OrchardHasher, ORCHARD_ROOTS};
-pub use key::{derive_orchard_keys, OrchardKeyBytes};
+pub use key::{derive_orchard_keys, new_orchard_keys_for_ak, OrchardKeyBytes};
 pub use note::{decode_merkle_path, DecryptedOrchardNote, OrchardDecrypter, OrchardViewKey};
 
 pub fn get_proving_key() -> &'static ProvingKey {
