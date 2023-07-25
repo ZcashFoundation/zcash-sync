@@ -37,15 +37,6 @@ fn main() -> anyhow::Result<()> {
         .get_matches();
 
     let coin = matches.value_of("coin").expect("coin argument missing");
-    let tx_filename = matches
-        .value_of("tx_filename")
-        .expect("input filename missing");
-    let out_filename = matches
-        .value_of("out_filename")
-        .expect("output filename missing");
-
-    let tx_plan = fs::read_to_string(tx_filename).expect("Should have been able to read the file");
-    let tx_plan: TransactionPlan = serde_json::from_str(&tx_plan)?;
 
     let (coin_type, network) = match coin {
         "zcash" => (CoinType::Zcash, Network::MainNetwork),
@@ -58,24 +49,14 @@ fn main() -> anyhow::Result<()> {
     let (seed, sk, fvk, _pa, _ofvk) = decode_key(coin, &key, index)?;
     let seed = seed.unwrap();
 
+    let bip44_path = format!("m/44'/{}'/0'/0/{}", network.coin_type(), index);
+    let (tsk, _address) = derive_tkeys(&network, &seed, &bip44_path)?;
+    let transparent_sk = SecretKey::from_str(&tsk).unwrap();
+
     let fvk =
         decode_extended_full_viewing_key(network.hrp_sapling_extended_full_viewing_key(), &fvk)
             .unwrap()
             .to_diversifiable_full_viewing_key();
-    let tx_plan_fvk = decode_extended_full_viewing_key(
-        network.hrp_sapling_extended_full_viewing_key(),
-        &tx_plan.fvk,
-    )
-    .unwrap()
-    .to_diversifiable_full_viewing_key();
-
-    if fvk.to_bytes() != tx_plan_fvk.to_bytes() {
-        return Err(anyhow::anyhow!("Account does not match transaction"));
-    }
-
-    let bip44_path = format!("m/44'/{}'/0'/0/{}", network.coin_type(), index);
-    let (tsk, _address) = derive_tkeys(&network, &seed, &bip44_path)?;
-    let transparent_sk = SecretKey::from_str(&tsk).unwrap();
 
     let sapling_sk = sk.unwrap();
     let sapling_sk =
@@ -101,6 +82,27 @@ fn main() -> anyhow::Result<()> {
         let ufvk_str = ufvk.encode(&MainNetwork);
         println!("Unified Full Viewing Key: {:?}", ufvk_str);
         return Ok(());
+    }
+
+    let tx_filename = matches
+        .value_of("tx_filename")
+        .expect("input filename missing");
+    let out_filename = matches
+        .value_of("out_filename")
+        .expect("output filename missing");
+
+    let tx_plan = fs::read_to_string(tx_filename).expect("Should have been able to read the file");
+    let tx_plan: TransactionPlan = serde_json::from_str(&tx_plan)?;
+
+    let tx_plan_fvk = decode_extended_full_viewing_key(
+        network.hrp_sapling_extended_full_viewing_key(),
+        &tx_plan.fvk,
+    )
+    .unwrap()
+    .to_diversifiable_full_viewing_key();
+
+    if fvk.to_bytes() != tx_plan_fvk.to_bytes() {
+        return Err(anyhow::anyhow!("Account does not match transaction"));
     }
 
     let mut ufvk_str = String::new();
