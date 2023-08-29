@@ -1,14 +1,30 @@
+//! FROST signer demo.
+//!
+//! This CLI does two things:
+//!
+//! - With the "-gen" argument, it generates a new Orchard address and Unified
+//!   Full Viewing Key from a given `ak` (i.e. the FROST group public key
+//!   generated elsewhere). Note that the UFVK includes a Sapling address, due
+//!   to current zcash_client_backend limitations, but this demo only works for
+//!   Orchard.
+//! - Otherwise it will sign a transaction plan generated with Ywallet and write
+//!   the signed transaction. It will prompt for the UFVK and will print a
+//!   SIGHASH and a Randomizer, which are needed to generate a signature with
+//!   rerandomized FROST. It will them prompt for the signature and write the
+//!   signed transaction.
+//!
+//! Check the [FROST book](https://frost.zfnd.org/) for a complete tutorial
+//! for the demo.
 use std::fs;
 use std::str::FromStr;
 
 use clap::{Arg, Command};
-use orchard::keys::{FullViewingKey, Scope, SpendValidatingKey, SpendingKey};
+use orchard::keys::{Scope, SpendValidatingKey};
 use rand_chacha::rand_core::OsRng;
-use secp256k1::SecretKey;
+use warp_api_ffi::key2::decode_key;
 use warp_api_ffi::note_selection::SecretKeys;
-use warp_api_ffi::orchard::{derive_orchard_keys, new_orchard_keys_for_ak};
+use warp_api_ffi::orchard::new_orchard_keys_for_ak;
 use warp_api_ffi::{build_tx, TransactionPlan};
-use warp_api_ffi::{key2::decode_key, taddr::derive_tkeys};
 use zcash_client_backend::address::UnifiedAddress;
 use zcash_client_backend::encoding::{
     decode_extended_full_viewing_key, decode_extended_spending_key,
@@ -18,9 +34,8 @@ use zcash_params::coin::{get_coin_id, CoinType};
 use zcash_primitives::consensus::{MainNetwork, Network, Parameters};
 
 fn main() -> anyhow::Result<()> {
-    let matches = Command::new("Cold wallet Signer CLI")
+    let matches = Command::new("FROST Signer CLI")
         .version("1.0")
-        .arg(Arg::new("coin").short('c').long("coin").takes_value(true))
         .arg(
             Arg::new("tx_filename")
                 .short('t')
@@ -36,22 +51,12 @@ fn main() -> anyhow::Result<()> {
         .arg(Arg::new("gen").short('g').long("gen"))
         .get_matches();
 
-    let coin = matches.value_of("coin").expect("coin argument missing");
+    let (coin_type, network) = (CoinType::Zcash, Network::MainNetwork);
 
-    let (coin_type, network) = match coin {
-        "zcash" => (CoinType::Zcash, Network::MainNetwork),
-        "ycash" => (CoinType::Ycash, Network::YCashMainNetwork),
-        _ => panic!("Invalid coin"),
-    };
     let key = dotenv::var("KEY").unwrap();
     let index = u32::from_str(&dotenv::var("INDEX").unwrap_or_else(|_| "0".to_string())).unwrap();
     let coin = get_coin_id(coin_type);
-    let (seed, sk, fvk, _pa, _ofvk) = decode_key(coin, &key, index)?;
-    let seed = seed.unwrap();
-
-    let bip44_path = format!("m/44'/{}'/0'/0/{}", network.coin_type(), index);
-    let (tsk, _address) = derive_tkeys(&network, &seed, &bip44_path)?;
-    let transparent_sk = SecretKey::from_str(&tsk).unwrap();
+    let (_seed, sk, fvk, _pa, _ofvk) = decode_key(coin, &key, index)?;
 
     let fvk =
         decode_extended_full_viewing_key(network.hrp_sapling_extended_full_viewing_key(), &fvk)
@@ -109,11 +114,10 @@ fn main() -> anyhow::Result<()> {
     let stdin = std::io::stdin();
     println!("Input UFVK:");
     stdin.read_line(&mut ufvk_str).unwrap();
-    // let ufvk_str = "uview1kahs7mgjuarpeuzxnp6ktxjpu2d4uksgf9v05kck27el8v4edfzjfdpvxv7fw95xkf8cfq9nh4sthqu8ncs5sl024cc2e63qxtwx2qqzdrqvd4py42ng547eje0v0sqpr7vu77ywsq8wfty6aev4m48g83yuclppd7musyms87wunmkpps2rr0frmyc58ajyckulwlwnad3jkthp5f738c02n5kkg5vy7q8xm6npfdgc9x9emwpxnear09wx36qrk55q8f2x93zgeem8mjsj8h3ksueg6rj7me36kx03q4dax4kzltr964tygfpsuzchh34xzcwg52njt38etrwpjmnfft8xskgdmardnvlnwlv7t7pzc00zjhhl28q2dfkr2ylsyeq9znay6";
     let ufvk = UnifiedFullViewingKey::decode(&MainNetwork, &ufvk_str.trim()).unwrap();
 
     let keys = SecretKeys {
-        transparent: Some(transparent_sk),
+        transparent: None,
         sapling: Some(sapling_sk),
         orchard: None,
     };
